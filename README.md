@@ -50,6 +50,26 @@ These three devices were checked on one CachyOS machine (kernel `7.3.1-1-cachyos
 
 The G7 Pro receiver's USB product string is the generic Xbox 360 name. In the text report its `name` is the catalog model, `GameSir G7 Pro 8K`. The USB string is `hardware-name`. JSON `name` stays the USB string, and JSON `catalog_name` is the model.
 
+## Observed devices that are not catalog profiles
+
+These notes are from one CachyOS machine. A row here is not a production profile. `input registered` means Linux created a gamepad evdev node or a `js*` node. It does not mean the buttons or axes were used. `xpad-noone` is the driver symlink basename observed on that machine. It is not a driver every distribution has to install. Catalog matching still uses only vendor id, product id, and an interface selector. USB product strings and input names are not match fields.
+
+### GameSir G7 Pro 8K receiver, idle and active
+
+Active, catalogued: `3537:1033`, product `Xbox 360 Controller for Windows`, interface `ff/5d/01`, driver `xpad-noone`, profile `gamesir-g7-pro-8k-receiver`.
+
+Idle, same receiver, controller powered off: `3537:0575`, product `Gamepad`, interface `00` `03/00/00`, driver `usbhid`. The input nodes were consumer-control volume keys and a node with only `ABS_MISC`. There was no gamepad button bitmap and no `js*` handler, so the discovery heuristic did not list the device. Unplugging the receiver removed `3537:0575`. Plugging that receiver back in, controller still off, brought `3537:0575` back. Powering the controller on changed the id to `3537:1033`.
+
+That cycle is this receiver's two USB ids. It does not mean every `3537:0575` device is a G7 Pro receiver. The idle id is not a gamepad profile.
+
+### BIGBIG WON Blitz 2, one USB mode
+
+Physically observed on USB, not catalogued. `413d:2104`, product `Xbox 360 Controller`, input name `Black Shark Green Ghost Gamepad`. Interfaces: `00` `ff/5d/01` driver `xpad-noone`, `01` `03/01/01` driver `usbhid`, `02` `03/00/01` driver `usbhid`. padcompat listed it as `unknown` and `available`, with a gamepad evdev node, a joystick node, and another evdev node. Controls were not tested. Bluetooth and the 2.4 GHz receiver were not tested. The vid/pid pair is not treated as unique to the Blitz 2. The input name is a shared Xbox 360-style firmware name, and the USB product string is generic.
+
+### GuliKit KingKong 2 Pro, one USB mode
+
+Physically observed on USB, not catalogued. `0079:0122`, product `GuliKit Controller D`, input name `ZhiXu GuliKit Controller D`. Interface `00` `03/00/00`, driver `usbhid`. padcompat listed it as `unknown` and `available`, with a gamepad evdev node and a joystick node. Controls were not tested. Bluetooth and any other USB mode were not tested. `0079` is a shared vendor id, `03/00/00` is a generic HID interface, and the product string names a mode. That combination is not treated as unique to the KingKong 2 Pro.
+
 ## What a report row means
 
 Text `name` is the catalog model when one profile matched. `hardware-name` is the string from the device, and it is printed only when that string differs. Unknown and ambiguous devices keep the reported string as `name` and are not assigned a guessed model. JSON `name` is still that reported string, including the old fallback when the device has no product string. JSON `catalog_name` is unchanged. padcompat does not rename the device in Linux, Steam, or any other program. A disconnect line still uses the stored device name, because that event does not carry a separate catalog field.
