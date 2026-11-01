@@ -25,9 +25,10 @@ curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profi
 cargo test
 cargo run -- list
 cargo run -- watch
+cargo run -- profiles validate
 ```
 
-`watch` blocks. `--exit-after-ms N` stops after a bounded wait. `--json` prints the same snapshot as JSON, with USB ids and interface bytes as hex strings. `--show-serial` includes the USB serial string; the default text and JSON omit it. `--profiles PATH` replaces the built-in catalog with another version-1 file.
+`watch` blocks. `--exit-after-ms N` stops after a bounded wait. `--json` prints the same snapshot as JSON, with USB ids and interface bytes as hex strings. `--show-serial` includes the USB serial string; the default text and JSON omit it. `--profiles PATH` replaces the built-in catalog with another version-1 file. `profiles validate` checks that file, or the built-in catalog, and does not scan hardware. Exit status is 0 for a valid catalog and 1 for an invalid one. Contribution rules are in `CONTRIBUTING.md`.
 
 ## What a row means
 
@@ -50,7 +51,7 @@ profiles/controllers.toml ── validate ── match
 
 Matching key is `(vendor id, product id, interface class/subclass/protocol [, interface number])`. Vendor/product id alone does not select a profile. The loader rejects a profile with no interface selector, a duplicate id, an unknown field, and two profiles that could match the same interface. Several runtime matches become `ambiguous` instead of a silent pick.
 
-There is no plugin trait. The next catalog is another version-1 TOML file, or a later `version` once the struct grows (`bcdDevice`, required interface number, serial). Unknown keys fail validation on purpose.
+There is no plugin trait and profile text is never executed. The community catalog is `profiles/controllers.toml`. A profile is one `[[controller]]` table appended to that file. `--profiles PATH` loads a replacement file for local checks. Unknown keys fail validation on purpose. `expected_driver` is evidence from the machine where the profile was written, not proof the device works on every distribution. Recognition, driver binding, a registered gamepad node, and hands-on testing are separate facts. See `CONTRIBUTING.md`.
 
 Hotplug does not trust a single uevent. On add/change/bind it scans at 200ms and again about one second later, because xone creates the GIP input node after the USB interfaces exist. Disconnects scan immediately. The udev socket is non-blocking, so the process polls it.
 
@@ -64,6 +65,8 @@ Hotplug does not trust a single uevent. On add/change/bind it scans at 200ms and
 
 `1532:0a57` is the wired Wolverine V3 Pro. The 2.4 GHz dongle is `1532:0a59` and is not in the catalog. The G7 Pro receiver's gamepad interface was observed as `ff/5d/01` on `xpad-noone`. Its USB product string is the generic Xbox 360 name; the catalog name is `GameSir G7 Pro 8K`.
 
+Those three rows were checked on one CachyOS system. `xpad-noone` there is a customized out-of-tree driver. The catalog records that observation. It does not install the driver and it does not say the same setup is safe on another machine.
+
 ## Limitations
 
 - Bitmap parsing assumes 64-bit kernel `unsigned long` words, most-significant word first, which is what `/proc/bus/input/devices` prints on x86_64.
@@ -75,7 +78,9 @@ Hotplug does not trust a single uevent. On add/change/bind it scans at 200ms and
 
 ## Out of scope
 
-Driver rebinding, module loading, udev rules, virtual gamepads, privileged helpers, and a GUI.
+Driver rebinding, module loading, udev rules, virtual gamepads, privileged helpers, a background service, and a GUI.
+
+`.github/workflows/ci.yml` runs formatting, build, `cargo test`, Clippy, and `profiles validate` on pull requests. `cargo test` skips `tests/live_scan.rs`. That file is an opt-in USB scan (`cargo test --test live_scan -- --ignored`) and is not run on the GitHub runner. The workflow does not publish artifacts or deploy.
 
 ## License
 

@@ -44,6 +44,7 @@ struct Args {
 enum Command {
     List,
     Watch,
+    ProfilesValidate,
 }
 
 fn run() -> Result<(), CliFailure> {
@@ -107,16 +108,35 @@ fn run() -> Result<(), CliFailure> {
             }
             Ok(())
         }
+        Command::ProfilesValidate => {
+            let source = args
+                .profiles
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "profiles/controllers.toml".to_string());
+            if args.json {
+                println!(
+                    "{{\"source\":{},\"profiles\":{}}}",
+                    serde_json::to_string(&source).unwrap_or_else(|_| "\"\"".to_string()),
+                    profiles.len()
+                );
+            } else {
+                println!("{source}: {} profiles", profiles.len());
+            }
+            Ok(())
+        }
     }
 }
 
 fn load_catalog(path: Option<&Path>) -> Result<Vec<padcompat::ControllerProfile>, CliFailure> {
     match path {
-        None => builtin_profiles().map_err(|err| CliFailure::Run(err.to_string())),
+        None => builtin_profiles()
+            .map_err(|err| CliFailure::Run(format!("profiles/controllers.toml: {err}"))),
         Some(path) => {
             let text = fs::read_to_string(path)
-                .map_err(|err| CliFailure::Run(format!("read {}: {err}", path.display())))?;
-            load_profiles(&text).map_err(|err| CliFailure::Run(err.to_string()))
+                .map_err(|err| CliFailure::Run(format!("{}: {err}", path.display())))?;
+            load_profiles(&text)
+                .map_err(|err| CliFailure::Run(format!("{}: {err}", path.display())))
         }
     }
 }
@@ -154,6 +174,19 @@ fn parse_args(args: &[String]) -> Result<Args, CliFailure> {
             }
             "list" => command = Some(set_command(command, Command::List)?),
             "watch" => command = Some(set_command(command, Command::Watch)?),
+            "profiles" => {
+                let sub = iter.next().ok_or_else(|| {
+                    CliFailure::Usage(
+                        "profiles needs a subcommand, for example: profiles validate".to_string(),
+                    )
+                })?;
+                if sub != "validate" {
+                    return Err(CliFailure::Usage(format!(
+                        "unknown profiles subcommand {sub}"
+                    )));
+                }
+                command = Some(set_command(command, Command::ProfilesValidate)?);
+            }
             other => {
                 return Err(CliFailure::Usage(format!("unknown argument {other}")));
             }
@@ -194,9 +227,11 @@ padcompat — read-only Linux gamepad discovery
 Usage:
   padcompat [list] [--json] [--show-serial] [--profiles PATH]
   padcompat watch [--json] [--show-serial] [--profiles PATH] [--exit-after-ms MS]
+  padcompat profiles validate [--profiles PATH]
 
-list    Print controllers and exit. This is the default.
-watch   Print the current controllers, then connect, disconnect, and update events.
+list                Print controllers and exit. This is the default.
+watch               Print the current controllers, then connect, disconnect, and update events.
+profiles validate   Check the catalog. Does not scan hardware. Exit 0 when the file is valid.
 
 Hardware serial numbers are omitted unless --show-serial is set.
 Reads sysfs, /proc/bus/input/devices, and udev events. Does not need root.
@@ -237,6 +272,10 @@ mod tests {
                 .profiles
                 .is_some()
         );
+
+        let validate = parse_args(&args(&["profiles", "validate"])).unwrap();
+        assert_eq!(validate.command, Command::ProfilesValidate);
+        assert!(validate.profiles.is_none());
     }
 
     #[test]
@@ -251,6 +290,18 @@ mod tests {
         ));
         assert!(matches!(
             parse_args(&args(&["list", "watch"])),
+            Err(CliFailure::Usage(_))
+        ));
+        assert!(matches!(
+            parse_args(&args(&["profiles"])),
+            Err(CliFailure::Usage(_))
+        ));
+        assert!(matches!(
+            parse_args(&args(&["profiles", "install"])),
+            Err(CliFailure::Usage(_))
+        ));
+        assert!(matches!(
+            parse_args(&args(&["profiles", "validate", "--exit-after-ms", "10"])),
             Err(CliFailure::Usage(_))
         ));
     }

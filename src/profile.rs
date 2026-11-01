@@ -34,6 +34,7 @@ pub enum ProfileError {
     DuplicateId(String),
     EmptyName(String),
     EmptyDriver(String),
+    BadDriver { id: String, driver: String },
     NoInterfaces(String),
     BadForm { id: String, form: String },
     Overlap { a: String, b: String },
@@ -46,15 +47,25 @@ impl fmt::Display for ProfileError {
             Self::UnsupportedVersion(version) => {
                 write!(f, "unsupported profile catalog version {version}")
             }
-            Self::EmptyId(index) => write!(f, "controller {index} has an empty id"),
-            Self::DuplicateId(id) => write!(f, "duplicate profile id {id}"),
-            Self::EmptyName(id) => write!(f, "profile {id} has an empty name"),
-            Self::EmptyDriver(id) => write!(f, "profile {id} has an empty expected_driver"),
-            Self::NoInterfaces(id) => write!(f, "profile {id} has no interface selectors"),
-            Self::BadForm { id, form } => write!(f, "profile {id} has unknown form {form}"),
-            Self::Overlap { a, b } => {
-                write!(f, "profiles {a} and {b} match the same usb identity")
+            Self::EmptyId(index) => write!(f, "controller {index}: id is empty"),
+            Self::DuplicateId(id) => write!(f, "profile {id}: duplicate id"),
+            Self::EmptyName(id) => write!(f, "profile {id}: name is empty"),
+            Self::EmptyDriver(id) => write!(f, "profile {id}: expected_driver is empty"),
+            Self::BadDriver { id, driver } => write!(
+                f,
+                "profile {id}: expected_driver {driver:?} is not a driver name"
+            ),
+            Self::NoInterfaces(id) => {
+                write!(f, "profile {id}: interface selectors are missing")
             }
+            Self::BadForm { id, form } => write!(
+                f,
+                "profile {id}: form {form:?} is not wired, usb-receiver, bluetooth, or unknown"
+            ),
+            Self::Overlap { a, b } => write!(
+                f,
+                "profiles {a} and {b}: overlapping interface selectors for the same vendor_id and product_id"
+            ),
         }
     }
 }
@@ -148,6 +159,12 @@ fn convert(index: usize, raw: RawController) -> Result<ControllerProfile, Profil
     if expected_driver.is_empty() {
         return Err(ProfileError::EmptyDriver(id));
     }
+    if !is_driver_name(&expected_driver) {
+        return Err(ProfileError::BadDriver {
+            id,
+            driver: expected_driver,
+        });
+    }
     if raw.interface.is_empty() {
         return Err(ProfileError::NoInterfaces(id));
     }
@@ -199,6 +216,19 @@ fn validate(profiles: &[ControllerProfile]) -> Result<(), ProfileError> {
         }
     }
     Ok(())
+}
+
+/// A driver name is the basename of a sysfs `driver` symlink. It is compared
+/// as text. It is never passed to a shell.
+fn is_driver_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphanumeric() {
+        return false;
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.')
 }
 
 fn conflicts(left: &ControllerProfile, right: &ControllerProfile) -> bool {
@@ -591,5 +621,256 @@ mod tests {
             load_profiles(empty_driver),
             Err(ProfileError::EmptyDriver(_))
         ));
+    }
+
+    #[test]
+    fn validation_errors_name_the_profile_and_the_field() {
+        let missing_name = r#"
+            version = 1
+            [[controller]]
+            id = "bare"
+            vendor_id = 0x1111
+            product_id = 0x2222
+            expected_driver = "xpad"
+            form = "wired"
+            [[controller.interface]]
+            class = 1
+            subclass = 2
+            protocol = 3
+        "#;
+        let missing = load_profiles(missing_name).unwrap_err().to_string();
+        assert!(missing.contains("name"), "{missing}");
+
+        let bad_id = "version = 1\n[[controller]]\nvendor_id = 0x10000\n";
+        let bad_usb = load_profiles(bad_id).unwrap_err().to_string();
+        assert!(
+            bad_usb.contains("vendor_id") || bad_usb.contains("65536") || bad_usb.contains("u16"),
+            "{bad_usb}"
+        );
+
+        let not_hex = r#"
+            version = 1
+            [[controller]]
+            id = "wide"
+            name = "Wide"
+            vendor_id = "zz"
+            product_id = 1
+            expected_driver = "xpad"
+            form = "wired"
+            [[controller.interface]]
+            class = 1
+            subclass = 2
+            protocol = 3
+        "#;
+        let hex = load_profiles(not_hex).unwrap_err().to_string();
+        assert!(hex.contains("vendor_id") || hex.contains("zz"), "{hex}");
+
+        let malformed = load_profiles("version = [\n").unwrap_err().to_string();
+        assert!(malformed.contains("profile toml"), "{malformed}");
+
+        let command = r#"
+            version = 1
+            [[controller]]
+            id = "evil"
+            name = "Evil"
+            vendor_id = 1
+            product_id = 2
+            expected_driver = "xpad; rm -rf /"
+            form = "wired"
+            [[controller.interface]]
+            class = 1
+            subclass = 2
+            protocol = 3
+        "#;
+        match load_profiles(command) {
+            Err(ProfileError::BadDriver { id, driver }) => {
+                assert_eq!(id, "evil");
+                assert!(driver.contains("rm"));
+            }
+            other => panic!("expected bad driver, got {other:?}"),
+        }
+
+        let overlap = load_profiles(
+            r#"
+            version = 1
+            [[controller]]
+            id = "left"
+            name = "Left"
+            vendor_id = 0x10
+            product_id = 0x20
+            expected_driver = "drv-a"
+            form = "wired"
+            [[controller.interface]]
+            class = 0xff
+            subclass = 0x01
+            protocol = 0x02
+            [[controller]]
+            id = "right"
+            name = "Right"
+            vendor_id = 0x10
+            product_id = 0x20
+            expected_driver = "drv-b"
+            form = "wired"
+            [[controller.interface]]
+            class = 0xff
+            subclass = 0x01
+            protocol = 0x02
+            "#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            overlap.contains("left") && overlap.contains("right"),
+            "{overlap}"
+        );
+        assert!(overlap.contains("interface"), "{overlap}");
+
+        let bad_form = load_profiles(
+            r#"
+            version = 1
+            [[controller]]
+            id = "x"
+            name = "X"
+            vendor_id = 1
+            product_id = 2
+            expected_driver = "drv"
+            form = "dongle"
+            [[controller.interface]]
+            class = 1
+            subclass = 2
+            protocol = 3
+            "#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            bad_form.contains("profile x") && bad_form.contains("form"),
+            "{bad_form}"
+        );
+
+        let unknown = load_profiles(
+            r#"
+            version = 1
+            [[controller]]
+            id = "x"
+            name = "X"
+            vendor_id = 1
+            product_id = 2
+            expected_driver = "drv"
+            form = "wired"
+            plugin = "nope"
+            [[controller.interface]]
+            class = 1
+            subclass = 2
+            protocol = 3
+            "#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(unknown.contains("plugin"), "{unknown}");
+
+        let version = load_profiles("version = 2\ncontroller = []\n")
+            .unwrap_err()
+            .to_string();
+        assert!(version.contains("version"), "{version}");
+    }
+
+    #[test]
+    fn one_profile_may_list_several_interfaces() {
+        let text = r#"
+            version = 1
+            [[controller]]
+            id = "composite"
+            name = "Composite"
+            vendor_id = 0x1111
+            product_id = 0x2222
+            expected_driver = "example-driver"
+            form = "wired"
+            [[controller.interface]]
+            class = 0xff
+            subclass = 0x5d
+            protocol = 0x01
+            [[controller.interface]]
+            class = 0x03
+            subclass = 0x00
+            protocol = 0x00
+        "#;
+        let profiles = load_profiles(text).expect("composite profile is valid");
+        assert_eq!(profiles[0].interfaces.len(), 2);
+        assert_eq!(
+            identify(
+                &usb(
+                    0x1111,
+                    0x2222,
+                    vec![iface(0, 0xff, 0x5d, 0x01), iface(1, 0x03, 0x00, 0x00)]
+                ),
+                &profiles
+            ),
+            Identity::Known {
+                profile_id: "composite".into()
+            }
+        );
+    }
+
+    #[test]
+    fn contributed_catalog_entry_is_identified_without_engine_changes() {
+        let mut text = BUILTIN.to_string();
+        text.push_str(
+            r#"
+            [[controller]]
+            id = "fixture-synthetic-pad"
+            name = "Fixture Synthetic Pad"
+            vendor_id = 0x1234
+            product_id = 0xabcd
+            expected_driver = "fixture-driver"
+            form = "wired"
+            notes = "Test-only. Not a verified device."
+
+            [[controller.interface]]
+            class = 0xff
+            subclass = 0x47
+            protocol = 0xd0
+            "#,
+        );
+        let profiles = load_profiles(&text).expect("builtin catalog plus one fixture");
+        assert_eq!(profiles.len(), 4);
+        assert_eq!(builtin_profiles().unwrap().len(), 3);
+        assert_eq!(
+            identify(
+                &usb(0x1234, 0xabcd, vec![iface(0, 0xff, 0x47, 0xd0)]),
+                &profiles
+            ),
+            Identity::Known {
+                profile_id: "fixture-synthetic-pad".into()
+            }
+        );
+        assert_eq!(
+            identify(
+                &usb(0x3537, 0x1010, vec![iface(0, 0xff, 0x47, 0xd0)]),
+                &profiles
+            ),
+            Identity::Known {
+                profile_id: "gamesir-g7-se".into()
+            }
+        );
+        assert_eq!(
+            identify(
+                &usb(0x3537, 0x1033, vec![iface(0, 0xff, 0x5d, 0x01)]),
+                &profiles
+            ),
+            Identity::Known {
+                profile_id: "gamesir-g7-pro-8k-receiver".into()
+            }
+        );
+        assert_eq!(
+            identify(
+                &usb(0x1532, 0x0a57, vec![iface(0, 0xff, 0x5d, 0x01)]),
+                &profiles
+            ),
+            Identity::Known {
+                profile_id: "razer-wolverine-v3-pro-8k".into()
+            }
+        );
+        assert!(profiles.iter().all(|profile| profile.product_id != 0x0a59));
     }
 }

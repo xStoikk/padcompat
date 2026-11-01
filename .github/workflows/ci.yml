@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install libudev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --component rustfmt --component clippy
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Format
+        run: cargo fmt --check
+      # Default `cargo test` skips ignored tests. tests/live_scan.rs is the
+      # opt-in hardware scan and is not run on this runner.
+      - name: Test
+        run: cargo test
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Validate catalog
+        run: cargo run --quiet -- profiles validate

@@ -6,7 +6,14 @@ use padcompat::{
     format_snapshot, format_snapshot_json, scan_system,
 };
 
+/// Physical USB scan. `cargo test` does not run it.
+///
+/// `cargo test --test live_scan -- --ignored` runs it. The run fails when
+/// none of the three development controllers are on the bus, so an empty
+/// machine cannot report a hardware pass. Each id that is present keeps the
+/// assertions below. An id that is absent is not described as checked.
 #[test]
+#[ignore = "needs a development controller on USB; cargo test --test live_scan -- --ignored"]
 fn live_scan_matches_connected_known_controllers() {
     let profiles = builtin_profiles().expect("builtin profiles");
     let snapshot = scan_system(&profiles).expect("scan");
@@ -102,6 +109,11 @@ fn live_scan_matches_connected_known_controllers() {
         assert!(!controller.joystick.is_empty());
         assert!(!controller.gamepad_evdev.is_empty());
     }
+
+    assert!(
+        sysfs_has(0x3537, 0x1010) || sysfs_has(0x3537, 0x1033) || sysfs_has(0x1532, 0x0a57),
+        "none of 3537:1010, 3537:1033, 1532:0a57 are on the USB bus"
+    );
 
     if Path::new("/dev/input").is_dir() {
         assert!(

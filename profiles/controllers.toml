@@ -7,7 +7,13 @@
 #
 # expected_driver is the USB interface driver name: the basename of the sysfs
 # `driver` symlink (`xone-wired`, `xpad-noone`), not the kernel module name
-# (`xone_wired`, `xpad_noone`).
+# (`xone_wired`, `xpad_noone`). It is the name observed when the profile was
+# written. It is not a claim that the driver is installed, safe, or sufficient
+# on every distribution. padcompat never runs it.
+#
+# The three profiles below were checked on one CachyOS machine. The
+# xpad-noone driver on that machine is out of tree. Do not treat this file as
+# a compatibility certificate.
 #
 # interface.number is optional. Omit it to match that class/subclass/protocol
 # on any interface number.
