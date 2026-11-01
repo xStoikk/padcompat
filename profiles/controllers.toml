@@ -1,0 +1,63 @@
+# Version 1 controller catalog.
+#
+# A profile matches a USB device only when vendor id, product id, and at least
+# one interface selector all match. Vendor/product id alone is rejected by the
+# loader (every profile must list an interface). Selectors that could match the
+# same interface of the same ids are also rejected.
+#
+# expected_driver is the USB interface driver name: the basename of the sysfs
+# `driver` symlink (`xone-wired`, `xpad-noone`), not the kernel module name
+# (`xone_wired`, `xpad_noone`).
+#
+# interface.number is optional. Omit it to match that class/subclass/protocol
+# on any interface number.
+#
+# `form` is the product link (wired, usb-receiver, bluetooth). It is not the
+# kernel bus. `connection` in the report is the observed bus. A wired pad and
+# a USB dongle are both `connection: usb` when the kernel enumerates them on
+# USB; `form` is what separates them.
+
+version = 1
+
+[[controller]]
+id = "gamesir-g7-se"
+name = "GameSir G7 SE"
+vendor_id = 0x3537
+product_id = 0x1010
+expected_driver = "xone-wired"
+form = "wired"
+
+[[controller.interface]]
+class = 0xff
+subclass = 0x47
+protocol = 0xd0
+
+[[controller]]
+id = "gamesir-g7-pro-8k-receiver"
+name = "GameSir G7 Pro 8K"
+vendor_id = 0x3537
+product_id = 0x1033
+expected_driver = "xpad-noone"
+form = "usb-receiver"
+
+# Observed on the connected receiver: interface 00, class ff, subclass 5d,
+# protocol 01, driver xpad-noone. Protocol 81 was not observed and is not a
+# selector.
+[[controller.interface]]
+class = 0xff
+subclass = 0x5d
+protocol = 0x01
+
+[[controller]]
+id = "razer-wolverine-v3-pro-8k"
+name = "Razer Wolverine V3 Pro 8K"
+vendor_id = 0x1532
+product_id = 0x0a57
+expected_driver = "xpad-noone"
+# Wired controller. The 2.4 GHz dongle is 1532:0a59 and is not catalogued.
+form = "wired"
+
+[[controller.interface]]
+class = 0xff
+subclass = 0x5d
+protocol = 0x01
