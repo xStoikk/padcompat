@@ -66,7 +66,7 @@ Tested only on CachyOS, x86_64, with rustc 1.99.1 and libudev 262. `Cargo.toml` 
 
 Build time needs a Rust toolchain and pkg-config plus libudev headers. On the development machine those headers were already present at `/usr/lib/pkgconfig/libudev.pc`. Nothing was installed into the system for padcompat.
 
-The GitHub Actions workflow asks Ubuntu's package manager for `libudev-dev` and `pkg-config`. That job has not been observed running on GitHub. Treat those package names as the workflow's request, not as a tested desktop install.
+The first GitHub-hosted run installed `libudev-dev` and `pkg-config` on Ubuntu and passed: [ci run 41263160329](https://github.com/xStoikk/padcompat/actions/runs/41263160329). That confirms those package names on that runner. It is not a tested desktop install, and it does not prove the program works on every Linux distribution.
 
 ## Build and run
 
@@ -134,7 +134,7 @@ How to add a controller is in `CONTRIBUTING.md`.
 
 `cargo test` runs the unit tests, the catalog CLI tests, and the fixture scan. It skips `tests/live_scan.rs`.
 
-`.github/workflows/ci.yml` is set up to run, on pull requests and on pushes to `master`: formatting, `cargo test`, Clippy with warnings denied, and `profiles validate`. The workflow token is read-only. It does not deploy or publish. That workflow has not run on GitHub yet.
+`.github/workflows/ci.yml` runs on pull requests and on pushes to `master`. It checks formatting, `cargo test`, Clippy with warnings denied, and `profiles validate`. The workflow token is read-only. It does not deploy or publish. The first hosted run passed on GitHub-hosted Ubuntu: [ci run 41263160329](https://github.com/xStoikk/padcompat/actions/runs/41263160329). That run does not attach a controller. `tests/live_scan.rs` stays opt-in and is not part of CI. A green run does not prove compatibility with every Linux distribution.
 
 ## Limitations
 
