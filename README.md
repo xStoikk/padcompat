@@ -62,9 +62,11 @@ Idle, same receiver, controller powered off: `3537:0575`, product `Gamepad`, int
 
 That cycle is this receiver's two USB ids. It does not mean every `3537:0575` device is a G7 Pro receiver. The idle id is not a gamepad profile.
 
-### BIGBIG WON Blitz 2, one USB mode
+### BIGBIG WON Blitz 2, wired USB and 2.4 GHz receiver
 
-Physically observed on USB, not catalogued. `413d:2104`, product `Xbox 360 Controller`, input name `Black Shark Green Ghost Gamepad`. Interfaces: `00` `ff/5d/01` driver `xpad-noone`, `01` `03/01/01` driver `usbhid`, `02` `03/00/01` driver `usbhid`. padcompat listed it as `unknown` and `available`, with a gamepad evdev node, a joystick node, and another evdev node. Controls were not tested. Bluetooth and the 2.4 GHz receiver were not tested. The vid/pid pair is not treated as unique to the Blitz 2. The input name is a shared Xbox 360-style firmware name, and the USB product string is generic.
+Wired USB and the active 2.4 GHz link both exposed `413d:2104`. Not catalogued. Product `Xbox 360 Controller`, input name `Black Shark Green Ghost Gamepad`. Interfaces: `00` `ff/5d/01` driver `xpad-noone`, `01` `03/01/01` driver `usbhid`, `02` `03/00/01` driver `usbhid`. With the controller connected, padcompat listed it as `unknown` and `available`, with a gamepad evdev node, a joystick node, and another evdev node. That is registered input. Buttons and axes were not tested. The vid/pid pair is not treated as unique to the Blitz 2. The input name is a shared Xbox 360-style firmware name, and the USB product string is generic.
+
+The 2.4 GHz receiver was tied to that id by unplugging it while the controller was connected: `413d:2104` (sysname `1-12` in that capture) disappeared, and reinserting the same receiver brought `413d:2104` back. In the captured state with that receiver plugged in and the controller powered off, no Blitz receiver USB device appeared and `413d:2104` was absent. padcompat's other rows stayed at 3. No separate idle USB id was observed in those captured states. That off-state snapshot is not a claim about every firmware or power-management behavior. Bluetooth was not tested.
 
 ### GuliKit KingKong 2 Pro, one USB mode
 
