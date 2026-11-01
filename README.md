@@ -48,9 +48,11 @@ These three devices were checked on one CachyOS machine (kernel `7.3.1-1-cachyos
 
 `1532:0a59` is the Wolverine 2.4 GHz dongle. It was not tested and it is not in the catalog. No other wireless variant was added from a datasheet.
 
-The G7 Pro receiver's USB product string is the generic Xbox 360 name. The catalog name is `GameSir G7 Pro 8K`.
+The G7 Pro receiver's USB product string is the generic Xbox 360 name. In the text report its `name` is the catalog model, `GameSir G7 Pro 8K`. The USB string is `hardware-name`. JSON `name` stays the USB string, and JSON `catalog_name` is the model.
 
 ## What a report row means
+
+Text `name` is the catalog model when one profile matched. `hardware-name` is the string from the device, and it is printed only when that string differs. Unknown and ambiguous devices keep the reported string as `name` and are not assigned a guessed model. JSON `name` is still that reported string, including the old fallback when the device has no product string. JSON `catalog_name` is unchanged. padcompat does not rename the device in Linux, Steam, or any other program. A disconnect line still uses the stored device name, because that event does not carry a separate catalog field.
 
 `connection` is how the kernel attached the device. A cable and a USB dongle are both `usb`. `input-bus` is the bus of the gamepad evdev node. xone's GIP gamepad is `input-bus: virtual` while `connection` stays `usb`. `form` is the catalog's product link (`wired`, `usb-receiver`, `bluetooth`, or `unknown`), not the kernel bus.
 

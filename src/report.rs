@@ -21,9 +21,10 @@ pub fn format_snapshot(snapshot: &Snapshot, options: ReportOptions) -> String {
     for controller in &snapshot.controllers {
         let _ = writeln!(out);
         let _ = writeln!(out, "{}", identity_label(&controller.identity));
-        let _ = writeln!(out, "  name: {}", controller.name);
-        if let Some(catalog) = &controller.catalog_name {
-            let _ = writeln!(out, "  catalog: {catalog}");
+        let friendly = friendly_name(controller);
+        let _ = writeln!(out, "  name: {friendly}");
+        if controller.name != friendly {
+            let _ = writeln!(out, "  hardware-name: {}", controller.name);
         }
         let _ = writeln!(
             out,
@@ -121,15 +122,7 @@ fn without_serial(controller: &Controller) -> Controller {
 
 pub fn format_event(event: &DeviceEvent) -> String {
     match event {
-        DeviceEvent::Connected(controller) => format!(
-            "connected {} {} {} {} status={} driver={}",
-            controller.instance,
-            identity_label(&controller.identity),
-            controller.name,
-            usb_id(controller.vendor_id, controller.product_id),
-            status_label(controller.availability),
-            driver_summary(controller),
-        ),
+        DeviceEvent::Connected(controller) => format_presence("connected", controller),
         DeviceEvent::Disconnected {
             instance,
             name,
@@ -139,16 +132,39 @@ pub fn format_event(event: &DeviceEvent) -> String {
             "disconnected {instance} {name} {}",
             usb_id(*vendor_id, *product_id)
         ),
-        DeviceEvent::Updated(controller) => format!(
-            "updated {} {} {} {} status={} driver={}",
-            controller.instance,
-            identity_label(&controller.identity),
-            controller.name,
-            usb_id(controller.vendor_id, controller.product_id),
-            status_label(controller.availability),
-            driver_summary(controller),
-        ),
+        DeviceEvent::Updated(controller) => format_presence("updated", controller),
     }
+}
+
+/// Catalog model for a single known match. Unknown and ambiguous devices keep
+/// the reported name. This does not change the JSON `name` field.
+fn friendly_name(controller: &Controller) -> &str {
+    if matches!(controller.identity, Identity::Known { .. }) {
+        if let Some(catalog) = controller
+            .catalog_name
+            .as_deref()
+            .filter(|name| !name.is_empty())
+        {
+            return catalog;
+        }
+    }
+    &controller.name
+}
+
+fn format_presence(kind: &str, controller: &Controller) -> String {
+    let friendly = friendly_name(controller);
+    let mut line = format!(
+        "{kind} {} {} {friendly} {} status={} driver={}",
+        controller.instance,
+        identity_label(&controller.identity),
+        usb_id(controller.vendor_id, controller.product_id),
+        status_label(controller.availability),
+        driver_summary(controller),
+    );
+    if controller.name != friendly {
+        line.push_str(&format!(" hardware-name={}", controller.name));
+    }
+    line
 }
 
 fn identity_label(identity: &Identity) -> String {
@@ -276,7 +292,9 @@ mod tests {
         let text = format_snapshot(&snap, ReportOptions::default());
         assert!(text.contains("kernel: 7.3.1-1-cachyos"));
         assert!(text.contains("gamesir-g7-se"));
-        assert!(text.contains("catalog: GameSir G7 SE"));
+        assert!(text.contains("name: GameSir G7 SE"));
+        assert!(text.contains("hardware-name: GameSir-G7 SE Controller for Xbox"));
+        assert!(!text.contains("catalog:"));
         assert!(text.contains("driver: xone-wired (expected)"));
         assert!(text.contains("02 ff/47/d0 driver=unbound"));
         assert!(text.contains("status: no-gamepad-input"));
@@ -337,6 +355,263 @@ mod tests {
         assert!(!event_json.contains("SECRET-SERIAL"));
         let event_shown = format_event_json(&event, ReportOptions { show_serial: true }).unwrap();
         assert!(event_shown.contains("SECRET-SERIAL"));
+    }
+
+    #[test]
+    fn friendly_name_is_text_only_and_json_name_stays_reported() {
+        let profiles = builtin_profiles().unwrap();
+        let g7_se = usb(
+            "1-6",
+            0x3537,
+            0x1010,
+            Some("GameSir-G7 SE Controller for Xbox"),
+            (0xff, 0x47, 0xd0),
+            Some("xone-wired"),
+        );
+        let g7_pro = usb(
+            "1-7",
+            0x3537,
+            0x1033,
+            Some("Xbox 360 Controller for Windows"),
+            (0xff, 0x5d, 0x01),
+            Some("xpad-noone"),
+        );
+        let wolverine = usb(
+            "1-9",
+            0x1532,
+            0x0a57,
+            Some("Razer Wolverine V3 Pro for PC"),
+            (0xff, 0x5d, 0x01),
+            Some("xpad-noone"),
+        );
+        let same_as_catalog = usb(
+            "1-8",
+            0x3537,
+            0x1010,
+            Some("GameSir G7 SE"),
+            (0xff, 0x47, 0xd0),
+            Some("xone-wired"),
+        );
+        let missing_product = usb(
+            "1-5",
+            0x3537,
+            0x1010,
+            None,
+            (0xff, 0x47, 0xd0),
+            Some("xone-wired"),
+        );
+        let empty_product = usb(
+            "1-4",
+            0x3537,
+            0x1010,
+            Some(""),
+            (0xff, 0x47, 0xd0),
+            Some("xone-wired"),
+        );
+        let snap = assemble(
+            &[
+                g7_se,
+                g7_pro,
+                wolverine,
+                same_as_catalog,
+                missing_product,
+                empty_product,
+            ],
+            &[],
+            &profiles,
+            "k",
+        );
+        let text = format_snapshot(&snap, ReportOptions::default());
+        assert!(text.contains("name: GameSir G7 SE"));
+        assert!(text.contains("hardware-name: GameSir-G7 SE Controller for Xbox"));
+        assert!(text.contains("name: GameSir G7 Pro 8K"));
+        assert!(text.contains("hardware-name: Xbox 360 Controller for Windows"));
+        assert!(text.contains("name: Razer Wolverine V3 Pro 8K"));
+        assert!(text.contains("hardware-name: Razer Wolverine V3 Pro for PC"));
+        let same = snap
+            .controllers
+            .iter()
+            .find(|controller| controller.instance == "1-8")
+            .unwrap();
+        let same_text = format_snapshot(
+            &crate::model::Snapshot {
+                kernel_release: "k".into(),
+                controllers: vec![same.clone()],
+                warnings: Vec::new(),
+            },
+            ReportOptions::default(),
+        );
+        assert!(same_text.contains("name: GameSir G7 SE"));
+        assert!(!same_text.contains("hardware-name:"));
+        let missing = snap
+            .controllers
+            .iter()
+            .find(|controller| controller.instance == "1-5")
+            .unwrap();
+        assert_eq!(missing.name, "GameSir G7 SE");
+        assert_eq!(missing.catalog_name.as_deref(), Some("GameSir G7 SE"));
+        let missing_text = format_snapshot(&one(missing), ReportOptions::default());
+        assert!(missing_text.contains("name: GameSir G7 SE"));
+        assert!(!missing_text.contains("hardware-name:"));
+        let empty = snap
+            .controllers
+            .iter()
+            .find(|controller| controller.instance == "1-4")
+            .unwrap();
+        assert_eq!(empty.name, "GameSir G7 SE");
+        let empty_text = format_snapshot(&one(empty), ReportOptions::default());
+        assert!(empty_text.contains("name: GameSir G7 SE"));
+        assert!(!empty_text.contains("hardware-name:"));
+
+        let json = format_snapshot_json(&snap, ReportOptions::default()).unwrap();
+        assert!(json.contains("\"name\": \"Xbox 360 Controller for Windows\""));
+        assert!(json.contains("\"catalog_name\": \"GameSir G7 Pro 8K\""));
+        assert!(json.contains("\"name\": \"GameSir-G7 SE Controller for Xbox\""));
+        assert!(!json.contains("hardware-name"));
+
+        let pro = snap
+            .controllers
+            .iter()
+            .find(|controller| controller.instance == "1-7")
+            .unwrap();
+        let connected = format_event(&DeviceEvent::Connected(pro.clone()));
+        assert!(connected.contains("GameSir G7 Pro 8K"));
+        assert!(connected.contains("hardware-name=Xbox 360 Controller for Windows"));
+        assert!(connected.starts_with("connected 1-7 gamesir-g7-pro-8k-receiver "));
+        let updated = format_event(&DeviceEvent::Updated(pro.clone()));
+        assert!(updated.starts_with("updated 1-7 "));
+        assert!(updated.contains("GameSir G7 Pro 8K"));
+        let event_json = format_event_json(
+            &DeviceEvent::Connected(pro.clone()),
+            ReportOptions::default(),
+        )
+        .unwrap();
+        assert!(event_json.contains("\"name\":\"Xbox 360 Controller for Windows\""));
+        assert!(event_json.contains("\"catalog_name\":\"GameSir G7 Pro 8K\""));
+
+        let gone = assemble(&[], &[], &profiles, "k");
+        let pro_only = crate::model::Snapshot {
+            kernel_release: "k".into(),
+            controllers: vec![pro.clone()],
+            warnings: Vec::new(),
+        };
+        let disconnect = format_event(&diff_one(&pro_only, &gone));
+        assert_eq!(
+            disconnect,
+            "disconnected 1-7 Xbox 360 Controller for Windows 3537:1033"
+        );
+        let disconnect_json =
+            format_event_json(&diff_one(&pro_only, &gone), ReportOptions::default()).unwrap();
+        assert!(disconnect_json.contains("\"name\":\"Xbox 360 Controller for Windows\""));
+        assert!(!disconnect_json.contains("catalog_name"));
+    }
+
+    #[test]
+    fn unknown_and_ambiguous_reports_do_not_invent_a_model() {
+        let unknown_usb = usb(
+            "1-3",
+            0x1234,
+            0x5678,
+            Some("Generic X-Box pad"),
+            (0xff, 0x5d, 0x01),
+            Some("usbhid"),
+        );
+        let snap = assemble(&[unknown_usb], &[], &builtin_profiles().unwrap(), "k");
+        assert_eq!(snap.controllers.len(), 1);
+        assert!(matches!(snap.controllers[0].identity, Identity::Unknown));
+        let text = format_snapshot(&snap, ReportOptions::default());
+        assert!(text.contains("name: Generic X-Box pad"));
+        assert!(!text.contains("hardware-name:"));
+        assert!(!text.contains("GameSir"));
+        let json = format_snapshot_json(&snap, ReportOptions::default()).unwrap();
+        assert!(json.contains("\"name\": \"Generic X-Box pad\""));
+        assert!(!json.contains("catalog_name"));
+
+        let selector = crate::profile::InterfaceSelector {
+            class: 0xff,
+            subclass: 0x47,
+            protocol: 0xd0,
+            number: None,
+        };
+        let profiles = vec![
+            crate::profile::ControllerProfile {
+                id: "left".into(),
+                name: "Left Model".into(),
+                vendor_id: 0x3537,
+                product_id: 0x1010,
+                expected_driver: "xone-wired".into(),
+                form: crate::model::DeviceForm::Wired,
+                interfaces: vec![selector.clone()],
+                notes: None,
+            },
+            crate::profile::ControllerProfile {
+                id: "right".into(),
+                name: "Right Model".into(),
+                vendor_id: 0x3537,
+                product_id: 0x1010,
+                expected_driver: "xone-wired".into(),
+                form: crate::model::DeviceForm::Wired,
+                interfaces: vec![selector],
+                notes: None,
+            },
+        ];
+        let ambiguous = usb(
+            "1-6",
+            0x3537,
+            0x1010,
+            Some("GameSir-G7 SE Controller for Xbox"),
+            (0xff, 0x47, 0xd0),
+            Some("xone-wired"),
+        );
+        let snap = assemble(&[ambiguous], &[], &profiles, "k");
+        assert!(matches!(
+            snap.controllers[0].identity,
+            Identity::Ambiguous { .. }
+        ));
+        assert!(snap.controllers[0].catalog_name.is_none());
+        let text = format_snapshot(&snap, ReportOptions::default());
+        assert!(text.contains("name: GameSir-G7 SE Controller for Xbox"));
+        assert!(!text.contains("name: Left Model"));
+        assert!(!text.contains("name: Right Model"));
+        assert!(!text.contains("hardware-name:"));
+        let connected = format_event(&DeviceEvent::Connected(snap.controllers[0].clone()));
+        assert!(connected.contains("ambiguous: left, right"));
+        assert!(connected.contains("GameSir-G7 SE Controller for Xbox"));
+        assert!(!connected.contains("Left Model"));
+        assert!(!connected.contains("Right Model"));
+    }
+
+    fn one(controller: &Controller) -> Snapshot {
+        Snapshot {
+            kernel_release: "k".into(),
+            controllers: vec![controller.clone()],
+            warnings: Vec::new(),
+        }
+    }
+
+    fn usb(
+        sysname: &str,
+        vendor: u16,
+        product_id: u16,
+        product: Option<&str>,
+        iface: (u8, u8, u8),
+        driver: Option<&str>,
+    ) -> crate::model::ObservedUsb {
+        let (class, subclass, protocol) = iface;
+        crate::model::ObservedUsb {
+            sysname: sysname.into(),
+            vendor_id: vendor,
+            product_id,
+            product: product.map(str::to_string),
+            serial: None,
+            interfaces: vec![crate::model::UsbInterface {
+                number: Some(0),
+                class: Some(class),
+                subclass: Some(subclass),
+                protocol: Some(protocol),
+                driver: driver.map(str::to_string),
+            }],
+        }
     }
 
     fn diff_one(prev: &Snapshot, next: &Snapshot) -> DeviceEvent {
