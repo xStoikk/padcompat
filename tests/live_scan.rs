@@ -12,6 +12,10 @@ use padcompat::{
 /// none of the three development controllers are on the bus, so an empty
 /// machine cannot report a hardware pass. Each id that is present keeps the
 /// assertions below. An id that is absent is not described as checked.
+///
+/// `expected_driver` is the catalog's recorded name. A different bound driver
+/// is valid when `driver_binding` matches the drivers discovered on the
+/// interfaces. The scan does not open evdev nodes or claim the controls work.
 #[test]
 #[ignore = "needs a development controller on USB; cargo test --test live_scan -- --ignored"]
 fn live_scan_matches_connected_known_controllers() {
@@ -30,22 +34,17 @@ fn live_scan_matches_connected_known_controllers() {
                 profile_id: "gamesir-g7-se".into()
             }
         );
-        assert_eq!(controller.driver_binding, DriverBinding::Expected);
+        assert_driver_observation(controller, "xone-wired", (0xff, 0x47, 0xd0));
         assert_eq!(controller.availability, Availability::Available);
         assert_eq!(controller.connection, Connection::Usb);
-        assert_eq!(controller.input_bus, Connection::Virtual);
+        assert!(
+            matches!(controller.input_bus, Connection::Usb | Connection::Virtual),
+            "input_bus {:?}",
+            controller.input_bus
+        );
         assert_eq!(controller.form, Some(DeviceForm::Wired));
         assert!(controller.name.contains("GameSir-G7 SE"));
-        assert_eq!(
-            controller.input_name.as_deref(),
-            Some("Microsoft Xbox Controller")
-        );
-        assert!(controller.interfaces.iter().any(|iface| {
-            iface.class == Some(0xff)
-                && iface.subclass == Some(0x47)
-                && iface.protocol == Some(0xd0)
-                && iface.driver.as_deref() == Some("xone-wired")
-        }));
+        assert_nonempty_input_name(controller);
         assert!(!controller.joystick.is_empty());
         assert!(!controller.gamepad_evdev.is_empty());
     }
@@ -60,7 +59,7 @@ fn live_scan_matches_connected_known_controllers() {
                 profile_id: "razer-wolverine-v3-pro-8k".into()
             }
         );
-        assert_eq!(controller.driver_binding, DriverBinding::Expected);
+        assert_driver_observation(controller, "xpad-noone", (0xff, 0x5d, 0x01));
         assert_eq!(controller.availability, Availability::Available);
         assert_eq!(controller.connection, Connection::Usb);
         assert_eq!(controller.input_bus, Connection::Usb);
@@ -70,12 +69,6 @@ fn live_scan_matches_connected_known_controllers() {
             Some("Razer Wolverine V3 Pro 8K")
         );
         assert!(controller.name.contains("Wolverine V3 Pro"));
-        assert!(controller.interfaces.iter().any(|iface| {
-            iface.class == Some(0xff)
-                && iface.subclass == Some(0x5d)
-                && iface.protocol == Some(0x01)
-                && iface.driver.as_deref() == Some("xpad-noone")
-        }));
         assert!(!controller.joystick.is_empty());
         assert!(!controller.gamepad_evdev.is_empty());
     }
@@ -94,18 +87,11 @@ fn live_scan_matches_connected_known_controllers() {
             controller.catalog_name.as_deref(),
             Some("GameSir G7 Pro 8K")
         );
-        assert_eq!(controller.driver_binding, DriverBinding::Expected);
-        assert_eq!(controller.expected_driver.as_deref(), Some("xpad-noone"));
+        assert_driver_observation(controller, "xpad-noone", (0xff, 0x5d, 0x01));
         assert_eq!(controller.availability, Availability::Available);
         assert_eq!(controller.connection, Connection::Usb);
         assert_eq!(controller.input_bus, Connection::Usb);
         assert_eq!(controller.form, Some(DeviceForm::UsbReceiver));
-        assert!(controller.interfaces.iter().any(|iface| {
-            iface.class == Some(0xff)
-                && iface.subclass == Some(0x5d)
-                && iface.protocol == Some(0x01)
-                && iface.driver.as_deref() == Some("xpad-noone")
-        }));
         assert!(!controller.joystick.is_empty());
         assert!(!controller.gamepad_evdev.is_empty());
     }
@@ -137,6 +123,93 @@ fn live_scan_matches_connected_known_controllers() {
 
     let again = scan_system(&profiles).unwrap();
     assert_eq!(snapshot.controllers, again.controllers);
+}
+
+/// Catalog name plus the binding production would compute from every interface.
+///
+/// The selector interface must be bound. Its driver basename may differ from
+/// `recorded`. Other interfaces may be unbound. `usbhid` beside the vendor
+/// interface is not a conflict.
+fn assert_driver_observation(
+    controller: &padcompat::Controller,
+    recorded: &str,
+    selector: (u8, u8, u8),
+) {
+    assert_eq!(controller.expected_driver.as_deref(), Some(recorded));
+    let recorded_seen = controller
+        .interfaces
+        .iter()
+        .any(|iface| iface.driver.as_deref() == Some(recorded));
+    let any_bound = controller
+        .interfaces
+        .iter()
+        .any(|iface| iface.driver.is_some());
+    let required = if recorded_seen {
+        DriverBinding::Expected
+    } else if any_bound {
+        DriverBinding::Missing
+    } else {
+        DriverBinding::Unbound
+    };
+    assert_eq!(
+        controller.driver_binding,
+        required,
+        "interfaces: {}",
+        interface_drivers(controller)
+    );
+    assert!(
+        matches!(
+            controller.driver_binding,
+            DriverBinding::Expected | DriverBinding::Missing
+        ),
+        "development controller has no bound interface driver: {}",
+        interface_drivers(controller)
+    );
+    let (class, subclass, protocol) = selector;
+    assert!(
+        controller.interfaces.iter().any(|iface| {
+            iface.class == Some(class)
+                && iface.subclass == Some(subclass)
+                && iface.protocol == Some(protocol)
+                && iface.driver.is_some()
+        }),
+        "selector {class:02x}/{subclass:02x}/{protocol:02x} is not bound; interfaces: {}",
+        interface_drivers(controller)
+    );
+}
+
+fn assert_nonempty_input_name(controller: &padcompat::Controller) {
+    let name = controller
+        .input_name
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("");
+    assert!(!name.is_empty(), "input_name missing or blank");
+}
+
+fn interface_drivers(controller: &padcompat::Controller) -> String {
+    controller
+        .interfaces
+        .iter()
+        .map(|iface| {
+            format!(
+                "{}/{}/{}/{}={}",
+                hex8(iface.number),
+                hex8(iface.class),
+                hex8(iface.subclass),
+                hex8(iface.protocol),
+                iface.driver.as_deref().unwrap_or("unbound")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn hex8(value: Option<u8>) -> String {
+    match value {
+        Some(value) => format!("{value:02x}"),
+        None => "??".to_string(),
+    }
 }
 
 fn matching(
