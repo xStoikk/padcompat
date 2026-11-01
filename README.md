@@ -73,7 +73,7 @@ The GitHub Actions workflow asks Ubuntu's package manager for `libudev-dev` and 
 After the repository is published:
 
 ```sh
-git clone <repository-url>
+git clone https://github.com/xStoikk/padcompat.git
 cd padcompat
 ```
 
