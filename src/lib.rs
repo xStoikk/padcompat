@@ -6,6 +6,7 @@
 
 mod assemble;
 mod bits;
+mod diagnose;
 mod hotplug;
 mod model;
 mod proc_input;
@@ -15,6 +16,11 @@ mod scan;
 mod sysfs_usb;
 
 pub use assemble::{assemble, diff};
+pub use diagnose::{
+    ConnectionObservation, ControllerDiagnostic, DriverComparison, DriverObservation,
+    FunctionStatus, InputObservation, InterfaceObservation, Observation, Recognition,
+    diagnose_controller,
+};
 pub use hotplug::{WatchStop, watch};
 pub use model::{
     Availability, Connection, Controller, DeviceEvent, DeviceForm, DriverBinding, Identity,

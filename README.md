@@ -58,7 +58,9 @@ Text `name` is the catalog model when one profile matched. `hardware-name` is th
 
 `driver` is the USB interface driver (`xone-wired`, `xpad-noone`), not the module name (`xone_wired`, `xpad_noone`). `unbound` means that interface has no driver symlink. `status: available` means a gamepad evdev node or a `js*` node exists. `no-gamepad-input` means the USB device is present without one.
 
-Those are separate from someone actually pressing the buttons. The catalog does not record hands-on testing. See `CONTRIBUTING.md`.
+The text report adds a `diagnostic` block under each controller. `recognition` is the catalog match: one profile id, `unknown`, or every ambiguous id. `driver-observation` says whether the profile's recorded driver name was seen on an interface, whether some other driver was bound instead, whether no interface driver was bound, or whether there is nothing to compare. `unbound-interfaces` lists sibling interfaces with no driver when another interface did match or another driver is bound. That is not a verdict that the pad is broken. `other-drivers` lists extra bound names, such as `usbhid` beside `xpad-noone`. Those are not labeled conflicts. `input` says which node kinds discovery registered. It does not mean the node was opened. `function: not tested` is always printed. padcompat does not press buttons, read axes, or install drivers. `expected_driver` in the catalog is the name observed when the profile was written, not a package that every distribution must have. `connection`, `input-bus`, and `form` stay separate lines. JSON does not include this block.
+
+Those are separate from someone actually pressing the buttons. The catalog does not record hands-on testing. See `CONTRIBUTING.md`. A device the discovery heuristic omits is not given a guessed model in this block.
 
 Unknown devices are still listed when they expose a gamepad or joystick node, or an Xbox-style vendor interface (`ff/47/d0`, `ff/5d/01`, `ff/5d/81`). Keyboards, mice, and generic HID devices without those signals are omitted.
 
