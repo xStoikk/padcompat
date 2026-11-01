@@ -2,14 +2,14 @@
 
 padcompat recognizes controllers from `profiles/controllers.toml`. Add a `[[controller]]` table. Do not change the Rust discovery code for a new id, and do not add a plugin.
 
-A profile is not proof that a pad works on every distribution. These are different facts:
+A profile is not proof that a pad works on every distribution. A USB id by itself is not enough to call a controller fully working. These are different facts:
 
-| Fact | What it means |
+| Level | What it means |
 | --- | --- |
-| Recognition | Vendor id, product id, and one interface selector match a profile. |
-| Driver binding | At runtime, an interface `driver` symlink basename equals `expected_driver`. |
-| Registered gamepad input | A gamepad evdev node or `js*` node exists (`status: available`). |
-| Hands-on testing | Someone pressed the controls. The catalog does not record this. |
+| Recognized | Vendor id, product id, and one interface selector match a profile. |
+| Driver bound | Linux has attached a driver. For a known profile, the interface `driver` symlink basename equals `expected_driver`. |
+| Input available | Linux has registered a gamepad evdev node or a `js*` node (`status: available`). |
+| Functionally verified | Someone tested the actual controls. The catalog does not record this. Say so in the pull request if you did, and say so if you did not. |
 
 `expected_driver` is the interface driver you observed. It is not a shell command. padcompat never installs, loads, or runs it. The built-in `xpad-noone` rows were observed on one CachyOS machine with an out-of-tree driver. Copying those rows onto another install is not a recommendation to install that driver.
 
@@ -90,9 +90,9 @@ That command fails if none of `3537:1010`, `3537:1033`, or `1532:0a57` are on th
 
 1. Fork and branch from `master`.
 2. Add the profile to `profiles/controllers.toml`.
-3. Say what you observed: USB id, interface class/subclass/protocol, driver symlink, whether a `js*` or gamepad evdev node existed, and the distribution. Say if you did not test the buttons.
+3. Say which levels you actually observed: recognized, driver bound, input available, functionally verified. Include the USB id, interface class/subclass/protocol, driver symlink basename, whether a `js*` or gamepad evdev node existed, and the distribution. A USB id alone is not functional verification.
 4. Run the checks above.
-5. Open a pull request. The CI workflow runs the same checks. It does not publish a build.
+5. Open a pull request. The CI workflow is configured to run the same checks. It does not publish a build. It has not been observed on GitHub yet.
 
 ## What to leave out
 
