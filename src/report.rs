@@ -272,19 +272,12 @@ fn comparison_token(comparison: DriverComparison) -> &'static str {
 
 fn driver_phrase(driver: &DriverObservation<'_>) -> String {
     match driver.comparison {
-        DriverComparison::ExpectedObserved => {
-            let name = driver.expected_driver.unwrap_or("?");
-            format!("expected {name} observed")
-        }
+        DriverComparison::ExpectedObserved => catalog_bound(driver.expected_driver.unwrap_or("?")),
         DriverComparison::OtherDriverObserved => {
-            format!(
-                "expected {} not observed; bound {}",
-                driver.expected_driver.unwrap_or("?"),
-                driver.bound_drivers.join(",")
-            )
+            catalog_not_bound(driver.expected_driver.unwrap_or("?"), &driver.bound_drivers)
         }
         DriverComparison::NoDriverObserved => match driver.expected_driver {
-            Some(name) => format!("no interface driver bound; profile records {name}"),
+            Some(name) => catalog_unbound(name),
             None => "no interface driver bound".to_string(),
         },
         DriverComparison::NotApplicable => {
@@ -375,23 +368,11 @@ fn status_label(availability: Availability) -> &'static str {
 
 fn driver_summary(controller: &Controller) -> String {
     let bound = unique_drivers(&controller.interfaces);
+    let recorded = controller.expected_driver.as_deref().unwrap_or("?");
     match controller.driver_binding {
-        DriverBinding::Expected => {
-            let expected = controller.expected_driver.as_deref().unwrap_or("?");
-            format!("{expected} (expected)")
-        }
-        DriverBinding::Missing => {
-            let expected = controller.expected_driver.as_deref().unwrap_or("?");
-            if bound.is_empty() {
-                format!("missing {expected}")
-            } else {
-                format!("expected {expected}, bound {}", bound.join(","))
-            }
-        }
-        DriverBinding::Unbound => {
-            let expected = controller.expected_driver.as_deref().unwrap_or("?");
-            format!("unbound (expected {expected})")
-        }
+        DriverBinding::Expected => catalog_bound(recorded),
+        DriverBinding::Missing => catalog_not_bound(recorded, &bound),
+        DriverBinding::Unbound => catalog_unbound(recorded),
         DriverBinding::NotApplicable => {
             if bound.is_empty() {
                 "n/a".to_string()
@@ -400,6 +381,28 @@ fn driver_summary(controller: &Controller) -> String {
             }
         }
     }
+}
+
+/// Recorded catalog name is among the bound interface drivers.
+fn catalog_bound(name: &str) -> String {
+    format!("catalog-recorded {name} is bound")
+}
+
+/// Recorded catalog name is absent. Bound names are a fact, not a failure.
+fn catalog_not_bound(name: &str, bound: &[&str]) -> String {
+    if bound.is_empty() {
+        format!("catalog-recorded {name} is not bound")
+    } else {
+        format!(
+            "catalog-recorded {name} is not bound; bound {}",
+            bound.join(",")
+        )
+    }
+}
+
+/// A profile matched and no interface driver is bound.
+fn catalog_unbound(name: &str) -> String {
+    format!("no interface driver bound; catalog-recorded {name}")
 }
 
 fn unique_drivers(interfaces: &[UsbInterface]) -> Vec<&str> {
@@ -486,7 +489,9 @@ mod tests {
         assert!(text.contains("name: GameSir G7 SE"));
         assert!(text.contains("hardware-name: GameSir-G7 SE Controller for Xbox"));
         assert!(!text.contains("catalog:"));
-        assert!(text.contains("driver: xone-wired (expected)"));
+        assert!(text.contains("driver: catalog-recorded xone-wired is bound"));
+        assert!(!text.contains("(expected)"));
+        assert!(!text.contains("incompatible"));
         assert!(text.contains("02 ff/47/d0 driver=unbound"));
         assert!(text.contains("status: no-gamepad-input"));
         let json = format_snapshot_json(&snap, ReportOptions::default()).unwrap();
@@ -870,7 +875,8 @@ mod tests {
         assert!(text.contains("name: GameSir G7 SE"));
         assert!(text.contains("hardware-name: GameSir-G7 SE Controller for Xbox"));
         assert!(text.contains("recognition: known gamesir-g7-se"));
-        assert!(text.contains("driver-observation: expected xone-wired observed"));
+        assert!(text.contains("driver-observation: catalog-recorded xone-wired is bound"));
+        assert!(text.contains("driver: catalog-recorded xone-wired is bound"));
         assert!(text.contains("unbound-interfaces: 02"));
         assert!(text.contains("input: gamepad-evdev registered; joystick registered"));
         assert!(text.contains("function: not tested"));
@@ -879,7 +885,8 @@ mod tests {
         assert!(text.contains("name: GameSir G7 Pro 8K"));
         assert!(text.contains("hardware-name: Xbox 360 Controller for Windows"));
         assert!(text.contains("recognition: known gamesir-g7-pro-8k-receiver"));
-        assert!(text.contains("driver-observation: expected xpad-noone observed"));
+        assert!(text.contains("driver-observation: catalog-recorded xpad-noone is bound"));
+        assert!(text.contains("driver: catalog-recorded xpad-noone is bound"));
         assert!(text.contains("recognition: known razer-wolverine-v3-pro-8k"));
         assert!(text.contains("other-drivers: usbhid"));
         assert!(!text.contains("driver conflict"));
@@ -902,12 +909,15 @@ mod tests {
         assert!(connected.contains("GameSir G7 SE"));
         assert!(connected.contains("hardware-name=GameSir-G7 SE Controller for Xbox"));
         assert!(connected.contains("recognition=known:gamesir-g7-se"));
+        assert!(connected.contains("driver=catalog-recorded xone-wired is bound"));
         assert!(connected.contains("driver-observation=expected-observed"));
         assert!(connected.contains("unbound=02"));
         assert!(connected.contains("input=gamepad-evdev,joystick"));
         assert!(connected.contains("function=not-tested"));
         let updated = format_event(&DeviceEvent::Updated(se.clone()));
         assert!(updated.starts_with("updated 1-6 "));
+        assert!(updated.contains("driver=catalog-recorded xone-wired is bound"));
+        assert!(updated.contains("driver-observation=expected-observed"));
         assert!(updated.contains("recognition=known:gamesir-g7-se"));
         assert!(updated.contains("function=not-tested"));
 
@@ -935,7 +945,9 @@ mod tests {
         );
         assert!(unknown_text.contains("name: Generic X-Box pad"));
         assert!(unknown_text.contains("recognition: unknown"));
+        assert!(unknown_text.contains("driver: usbhid"));
         assert!(unknown_text.contains("driver-observation: not applicable; bound usbhid"));
+        assert!(!unknown_text.contains("catalog-recorded"));
         assert!(!unknown_text.contains("other-drivers:"));
         assert!(!unknown_text.contains("GameSir"));
 
@@ -992,11 +1004,15 @@ mod tests {
         other.joystick = vec!["/dev/input/js0".into()];
         let other_text = format_snapshot(&one(&other), ReportOptions::default());
         assert!(
-            other_text
-                .contains("driver-observation: expected xone-wired not observed; bound usbhid")
+            other_text.contains("driver: catalog-recorded xone-wired is not bound; bound usbhid")
         );
+        assert!(other_text.contains(
+            "driver-observation: catalog-recorded xone-wired is not bound; bound usbhid"
+        ));
         assert!(other_text.contains("input: joystick registered; no gamepad evdev"));
         assert!(other_text.contains("function: not tested"));
+        assert!(!other_text.contains("not observed"));
+        assert!(!other_text.contains("incompatible"));
         assert!(!other_text.contains("conflict"));
 
         let mut none_bound = se.clone();
@@ -1009,10 +1025,12 @@ mod tests {
         none_bound.joystick.clear();
         let none_text = format_snapshot(&one(&none_bound), ReportOptions::default());
         assert!(
-            none_text.contains(
-                "driver-observation: no interface driver bound; profile records xone-wired"
-            )
+            none_text.contains("driver: no interface driver bound; catalog-recorded xone-wired")
         );
+        assert!(none_text.contains(
+            "driver-observation: no interface driver bound; catalog-recorded xone-wired"
+        ));
+        assert!(!none_text.contains("expected"));
         assert!(!none_text.contains("unbound-interfaces:"));
         assert!(none_text.contains("input: no gamepad input registered"));
 
@@ -1047,6 +1065,110 @@ mod tests {
         assert!(bt_event.contains("driver-observation=not-applicable"));
         assert!(bt_event.contains("function=not-tested"));
         assert!(!bt_event.contains("conflict"));
+    }
+
+    #[test]
+    fn stock_xpad_on_a_catalog_xpad_noone_profile_is_not_called_incompatible() {
+        let profiles = builtin_profiles().unwrap();
+        let wolverine = crate::model::ObservedUsb {
+            sysname: "1-9".into(),
+            vendor_id: 0x1532,
+            product_id: 0x0a57,
+            product: Some("Razer Wolverine V3 Pro for PC".into()),
+            serial: Some("DO-NOT-PRINT".into()),
+            interfaces: vec![
+                crate::model::UsbInterface {
+                    number: Some(0),
+                    class: Some(0xff),
+                    subclass: Some(0x5d),
+                    protocol: Some(0x01),
+                    driver: Some("xpad".into()),
+                },
+                crate::model::UsbInterface {
+                    number: Some(1),
+                    class: Some(0x03),
+                    subclass: Some(0x01),
+                    protocol: Some(0x01),
+                    driver: Some("usbhid".into()),
+                },
+                crate::model::UsbInterface {
+                    number: Some(2),
+                    class: Some(0x03),
+                    subclass: Some(0x00),
+                    protocol: Some(0x00),
+                    driver: Some("usbhid".into()),
+                },
+            ],
+        };
+        let input = crate::model::InputNode {
+            name: "Razer Wolverine V3 Pro (Wired)".into(),
+            phys: String::new(),
+            sysfs: "/devices/usb1/1-9/1-9:1.0/input/input9".into(),
+            bustype: 0x0003,
+            vendor_id: 0x1532,
+            product_id: 0x0a57,
+            handlers: vec!["event11".into(), "js0".into()],
+            key_bits: Vec::new(),
+            abs_bits: Vec::new(),
+        };
+        let snap = assemble(&[wolverine], &[input], &profiles, "7.3.1-1-cachyos");
+        let controller = &snap.controllers[0];
+        assert_eq!(controller.driver_binding, DriverBinding::Missing);
+        assert_eq!(controller.expected_driver.as_deref(), Some("xpad-noone"));
+        let text = format_snapshot(&snap, ReportOptions::default());
+        assert!(text.contains("name: Razer Wolverine V3 Pro 8K"));
+        assert!(text.contains("hardware-name: Razer Wolverine V3 Pro for PC"));
+        assert!(
+            text.contains("driver: catalog-recorded xpad-noone is not bound; bound xpad,usbhid")
+        );
+        assert!(text.contains(
+            "driver-observation: catalog-recorded xpad-noone is not bound; bound xpad,usbhid"
+        ));
+        assert!(text.contains("    00 ff/5d/01 driver=xpad"));
+        assert!(text.contains("    01 03/01/01 driver=usbhid"));
+        assert!(text.contains("    02 03/00/00 driver=usbhid"));
+        assert!(text.contains("input: gamepad-evdev registered; joystick registered"));
+        assert!(text.contains("function: not tested"));
+        assert!(!text.contains("other-drivers:"));
+        assert!(!text.contains("not observed"));
+        assert!(!text.contains("(expected)"));
+        assert!(!text.contains("incompatible"));
+        assert!(!text.contains("conflict"));
+        assert!(!text.contains("DO-NOT-PRINT"));
+
+        let json = format_snapshot_json(&snap, ReportOptions::default()).unwrap();
+        assert!(json.contains("\"expected_driver\": \"xpad-noone\""));
+        assert!(json.contains("\"driver_binding\": \"missing\""));
+        assert!(json.contains("\"driver\": \"xpad\""));
+        assert!(json.contains("\"driver\": \"usbhid\""));
+        assert!(!json.contains("DO-NOT-PRINT"));
+        assert!(!json.contains("catalog-recorded"));
+        assert!(!json.contains("diagnostic"));
+
+        let connected = format_event(&DeviceEvent::Connected(controller.clone()));
+        assert!(connected.starts_with("connected 1-9 razer-wolverine-v3-pro-8k "));
+        assert!(
+            connected
+                .contains("driver=catalog-recorded xpad-noone is not bound; bound xpad,usbhid")
+        );
+        assert!(connected.contains("driver-observation=other-driver-observed"));
+        assert!(connected.contains("bound=xpad,usbhid"));
+        assert!(connected.contains("function=not-tested"));
+        assert!(!connected.contains("unbound="));
+        let updated = format_event(&DeviceEvent::Updated(controller.clone()));
+        assert!(updated.starts_with("updated 1-9 "));
+        assert!(
+            updated.contains("driver=catalog-recorded xpad-noone is not bound; bound xpad,usbhid")
+        );
+        assert!(updated.contains("driver-observation=other-driver-observed"));
+        assert!(updated.contains("function=not-tested"));
+
+        let gone = assemble(&[], &[], &profiles, "7.3.1-1-cachyos");
+        let disconnect = format_event(&diff_one(&snap, &gone));
+        assert_eq!(
+            disconnect,
+            "disconnected 1-9 Razer Wolverine V3 Pro for PC 1532:0a57"
+        );
     }
 
     fn usb(
